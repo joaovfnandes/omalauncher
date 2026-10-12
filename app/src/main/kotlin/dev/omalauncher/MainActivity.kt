@@ -3,8 +3,10 @@ package dev.omalauncher
 import android.app.ActivityManager
 import android.app.role.RoleManager
 import android.content.Intent
+import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
+import android.os.Handler
 import android.util.Log
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -30,11 +32,32 @@ class MainActivity : ComponentActivity() {
     private val state = LauncherState()
 
     // FORK-LOCAL (spectrum/local): PlaybackCapture needs a MediaProjection token.
+    // The projection needs its foreground service started FIRST, or getMediaProjection throws.
     private val captureConsent =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK && result.data != null) {
+                startForegroundService(Intent(this, CaptureService::class.java))
                 val mgr = getSystemService(MediaProjectionManager::class.java)
-                CaptureSession.set(runCatching { mgr.getMediaProjection(result.resultCode, result.data!!) }.getOrNull())
+                val projection = runCatching { mgr.getMediaProjection(result.resultCode, result.data!!) }.getOrNull()
+                if (projection == null) {
+                    Log.w("spectrum", "consent OK but getMediaProjection returned null; stopping capture service")
+                    stopService(Intent(this, CaptureService::class.java))
+                } else {
+                    projection.registerCallback(
+                        object : MediaProjection.Callback() {
+                            override fun onStop() {
+                                Log.i("spectrum", "projection stopped; clearing session")
+                                CaptureSession.set(null)
+                                stopService(Intent(this@MainActivity, CaptureService::class.java))
+                            }
+                        },
+                        Handler(mainLooper),
+                    )
+                    Log.i("spectrum", "projection acquired")
+                }
+                CaptureSession.set(projection)
+            } else {
+                Log.i("spectrum", "capture consent denied/canceled: resultCode=${result.resultCode}")
             }
         }
 

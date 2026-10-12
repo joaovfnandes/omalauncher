@@ -8,6 +8,7 @@ import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.os.SystemClock
+import android.util.Log
 import dev.omalauncher.widgets.lang.Lst
 import dev.omalauncher.widgets.lang.Num
 import dev.omalauncher.widgets.lang.Obj
@@ -71,6 +72,7 @@ class Spectrum(
             val record = openCapture()
             if (record == null) {
                 // The target disallows capture, or audio is otherwise unreachable: zeros, not a crash.
+                Log.w("spectrum", "AudioRecord capture refused (target opted out?); emitting zeros")
                 val off = zeros(capturing = false, available = true)
                 last = off
                 trySend(off)
