@@ -61,6 +61,13 @@ class Spectrum(
                 trySend(unavailable())
                 delay(2000)
             }
+            while (CaptureSession.projection == null) {
+                // MainActivity asks on the way in; wait for the consent instead of failing.
+                val wait = zeros(capturing = false, available = true)
+                last = wait
+                trySend(wait)
+                delay(2000)
+            }
             val record = openCapture()
             if (record == null) {
                 // The target disallows capture, or audio is otherwise unreachable: zeros, not a crash.
@@ -106,12 +113,14 @@ class Spectrum(
             }
         }.conflate()
 
-    /** The capture tap: media/game/unknown usages, 48 kHz stereo 16-bit. Null when capture refuses. */
-    private fun openCapture(): AudioRecord? =
-        runCatching {
+    /** The capture tap: media/game/unknown usages, 48 kHz stereo 16-bit. Null when capture refuses.
+     *  Needs [CaptureSession]'s MediaProjection: the Builder has no no-arg constructor. */
+    private fun openCapture(): AudioRecord? {
+        val projection = CaptureSession.projection ?: return null
+        return runCatching {
             val tap =
                 AudioPlaybackCaptureConfiguration
-                    .Builder()
+                    .Builder(projection)
                     .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                     .addMatchingUsage(AudioAttributes.USAGE_GAME)
                     .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
@@ -132,6 +141,7 @@ class Spectrum(
                 .build()
                 .takeIf { it.state == AudioRecord.STATE_INITIALIZED }
         }.getOrNull()
+    }
 
     private fun frame(
         l: FloatArray,

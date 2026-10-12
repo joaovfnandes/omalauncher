@@ -3,11 +3,13 @@ package dev.omalauncher
 import android.app.ActivityManager
 import android.app.role.RoleManager
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.withResumed
 import kotlinx.coroutines.flow.first
@@ -20,11 +22,21 @@ import dev.omalauncher.ui.LauncherRoot
 import dev.omalauncher.ui.LauncherState
 import dev.omalauncher.ui.PromptRequest
 import dev.omalauncher.widgets.market.Share
+import dev.omalauncher.widgets.runtime.CaptureSession
 
 /** The home screen: widgets, pinned apps and the drawer; Linux windows open as their own tasks. */
 class MainActivity : ComponentActivity() {
     private val runtime get() = (application as App).runtime
     private val state = LauncherState()
+
+    // FORK-LOCAL (spectrum/local): PlaybackCapture needs a MediaProjection token.
+    private val captureConsent =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK && result.data != null) {
+                val mgr = getSystemService(MediaProjectionManager::class.java)
+                CaptureSession.set(runCatching { mgr.getMediaProjection(result.resultCode, result.data!!) }.getOrNull())
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,6 +48,9 @@ class MainActivity : ComponentActivity() {
         }
         handleDebugExec(intent)
         handleSharedWidget(intent)
+        // FORK-LOCAL (spectrum/local): ask for the capture token the spectrum source needs.
+        // Silent when `adb shell appops set <package> PROJECT_MEDIA allow` pre-granted it.
+        requestCaptureIfNeeded()
         // Asked on arriving at the home screen, not over the welcome screen of a fresh install,
         // and once nothing else is in front: not over the notification permission dialog that
         // opting into Linux there brings up.
@@ -43,6 +58,13 @@ class MainActivity : ComponentActivity() {
             snapshotFlow { runtime.launcherReady }.first { it }
             withResumed { requestHomeRole() }
         }
+    }
+
+    /** FORK-LOCAL (spectrum/local): one system dialog per process until granted, then silent. */
+    private fun requestCaptureIfNeeded() {
+        if (CaptureSession.projection != null) return
+        val mgr = getSystemService(MediaProjectionManager::class.java)
+        runCatching { captureConsent.launch(mgr.createScreenCaptureIntent()) }
     }
 
     /** Asks once to become the default home app; Android shows its own chooser. */
@@ -90,6 +112,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         runtime.wm.focus(null)
         removeStaleWindowTasks()
+        requestCaptureIfNeeded()
         // The user may have set or replaced the wallpaper while we were in the background.
         lifecycleScope.launch { runtime.themes.refreshLiveWallpaper() }
     }
