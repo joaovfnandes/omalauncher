@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalContext
 import android.app.WallpaperManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.snapshotFlow
@@ -11,6 +12,7 @@ import dev.omalauncher.widgets.Folder
 import dev.omalauncher.widgets.HomeItem
 import dev.omalauncher.widgets.Shortcut
 import dev.omalauncher.widgets.WidgetItem
+import dev.omalauncher.MainActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -85,7 +87,9 @@ fun HomeScreen(
     BackHandler(enabled = state.homeMenuOpen) { state.homeMenuOpen = false }
     BackHandler(enabled = state.editing != null && !state.homeMenuOpen) { state.editing = null }
     BackHandler(enabled = arrange.folder != null && !state.homeMenuOpen) { arrange.folder = null }
+    val homeContext = LocalContext.current
     LaunchedEffect(engine) {
+        val activity = homeContext as? MainActivity
         engine.launcherAction = { action ->
             when (action) {
                 // "themes" from before the screen was style; widgets still send it.
@@ -94,6 +98,8 @@ fun HomeScreen(
                 "store" -> state.storeOpen = true
                 "linux" -> state.linuxOpen = true
                 "drawer" -> state.open()
+                // FORK-LOCAL (spectrum/local): explicit tap only, never automatic.
+                "capture" -> activity?.requestCapture()
             }
         }
     }

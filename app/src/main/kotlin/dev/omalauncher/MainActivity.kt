@@ -48,9 +48,8 @@ class MainActivity : ComponentActivity() {
         }
         handleDebugExec(intent)
         handleSharedWidget(intent)
-        // FORK-LOCAL (spectrum/local): ask for the capture token the spectrum source needs.
-        // Silent when `adb shell appops set <package> PROJECT_MEDIA allow` pre-granted it.
-        requestCaptureIfNeeded()
+        // FORK-LOCAL (spectrum/local): capture consent is tap-only (launcher("capture")),
+        // never automatic: background launches loop, get BAL-blocked and spam.
         // Asked on arriving at the home screen, not over the welcome screen of a fresh install,
         // and once nothing else is in front: not over the notification permission dialog that
         // opting into Linux there brings up.
@@ -60,8 +59,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** FORK-LOCAL (spectrum/local): one system dialog per process until granted, then silent. */
-    private fun requestCaptureIfNeeded() {
+    /** FORK-LOCAL (spectrum/local): one consent dialog per tap, from a widget button.
+     *  Must run foreground (it does: the tap came from this activity); result lands in [captureConsent]. */
+    fun requestCapture() {
         if (CaptureSession.projection != null) return
         val mgr = getSystemService(MediaProjectionManager::class.java)
         runCatching { captureConsent.launch(mgr.createScreenCaptureIntent()) }
@@ -112,7 +112,6 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         runtime.wm.focus(null)
         removeStaleWindowTasks()
-        requestCaptureIfNeeded()
         // The user may have set or replaced the wallpaper while we were in the background.
         lifecycleScope.launch { runtime.themes.refreshLiveWallpaper() }
     }
