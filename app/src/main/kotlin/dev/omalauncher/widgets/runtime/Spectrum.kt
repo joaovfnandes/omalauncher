@@ -3,7 +3,10 @@ package dev.omalauncher.widgets.runtime
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.media.audiofx.Visualizer
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioPlaybackCaptureConfiguration
+import android.media.AudioRecord
 import android.os.SystemClock
 import dev.omalauncher.widgets.lang.Lst
 import dev.omalauncher.widgets.lang.Num
@@ -21,26 +24,20 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * A live spectrum of what's playing on the phone, for
+ * A live stereo spectrum of what's playing on the phone, for
  * `source s = android.spectrum` (also `android.audioSpectrum`).
  *
- * Captures the output mix (never the mic) through [Visualizer] on session 0,
- * runs the mono waveform through [Fft], and emits at most every 33 ms
- * (~30 fps). No foreground service: capture runs in the app process while a
- * widget subscribes, and stops when the last subscriber goes away.
+ * Captures this phone's media playback (never the mic) through
+ * [AudioPlaybackCaptureConfiguration] into an [AudioRecord], runs each channel
+ * through [Fft], and emits at most every 33 ms (~30 fps). No foreground service:
+ * capture runs in the app process while a widget subscribes, and stops when the
+ * last subscriber goes away.
  *
- * Mono fallback: [Visualizer] mixes stereo to mono, so `l` and `r` carry the
- * same bands and `stereo` is false. True L/R separation needs
- * AudioPlaybackCapture with a MediaProjection token, which requires a user
- * consent dialog and a foreground service — it can't be granted over adb for
- * an unattended test, so it stays a follow-up. The widget shape stays
- * `{l, r}` so it upgrades without changes.
- *
- * Value shape: `{l: [32 nums], r: [32 nums], available, capturing, stereo}`.
- * Bands run low→high (index 0 is ~50 Hz bass). Without RECORD_AUDIO,
- * `available` is false and the bands are zeros; grant it with
- * `adb shell pm grant <package> android.permission.RECORD_AUDIO` (the debug
- * fork's package is `dev.omalauncher.debug`).
+ * Value shape: `{l: [32 nums], r: [32 nums], available, capturing}`. Bands run
+ * low→high (index 0 is ~50 Hz bass); a widget mirrors them for display.
+ * Without RECORD_AUDIO, `available` is false and the bands are zeros; grant it
+ * with `adb shell pm grant <package> android.permission.RECORD_AUDIO` (the
+ * debug fork's package is `dev.omalauncher.debug`).
  */
 class Spectrum(
     private val context: Context,
@@ -64,63 +61,76 @@ class Spectrum(
                 trySend(unavailable())
                 delay(2000)
             }
-            val viz = openVisualizer()
-            if (viz == null) {
-                // Another app holds the output-mix capture, or audio is otherwise
-                // unreachable: zeros, not a crash.
+            val record = openCapture()
+            if (record == null) {
+                // The target disallows capture, or audio is otherwise unreachable: zeros, not a crash.
                 val off = zeros(capturing = false, available = true)
                 last = off
                 trySend(off)
                 awaitClose { }
                 return@callbackFlow
             }
-            // Visualizer capture sizes are powers of two; use whatever it granted.
-            val window = viz.captureSize.takeIf { it >= 128 } ?: 1024
-            val rate = (viz.samplingRate / 1000).takeIf { it > 0 } ?: Fft.SAMPLE_RATE
             val reader =
                 launch(Dispatchers.IO) {
-                    val wave = ByteArray(window)
-                    val mono = FloatArray(window)
+                    val pcm = ShortArray(Fft.WINDOW * 2)
+                    val left = FloatArray(Fft.WINDOW)
+                    val right = FloatArray(Fft.WINDOW)
+                    var filled = 0
                     var lastEmit = 0L
-                    while (isActive) {
-                        val ok = runCatching { viz.getWaveForm(wave) }.getOrDefault(Visualizer.ERROR)
-                        if (ok != Visualizer.SUCCESS) {
-                            delay(50)
+                    runCatching { record.startRecording() }
+                    while (isActive && record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                        val n = record.read(pcm, filled * 2, pcm.size - filled * 2)
+                        if (n <= 0) {
+                            delay(10)
                             continue
                         }
-                        // 8-bit unsigned with 128 as silence, to floats in -1..1.
-                        for (i in wave.indices) mono[i] = ((wave[i].toInt() and 0xFF) - 128) / 128f
-                        val bands = Fft.logBands(Fft.magnitudes(mono), sampleRate = rate, fftSize = window)
-                        last = frame(bands, bands, capturing = true)
+                        filled += n / 2
+                        if (filled < Fft.WINDOW) continue
+                        filled = 0
+                        Fft.channel(pcm, Fft.WINDOW, 0, left)
+                        Fft.channel(pcm, Fft.WINDOW, 1, right)
+                        val (l, r) = Fft.stereo(left, right)
+                        last = frame(l, r, capturing = true)
                         val now = SystemClock.elapsedRealtime()
                         if (now - lastEmit >= 33) {
                             lastEmit = now
                             trySend(last)
                         }
-                        delay(33)
                     }
                 }
             awaitClose {
                 reader.cancel()
-                runCatching { viz.setEnabled(false) }
-                viz.release()
+                runCatching { record.stop() }
+                record.release()
                 last = zeros(capturing = false, available = true)
             }
         }.conflate()
 
-    /** The output-mix tap: session 0, largest capture size, normalized scaling. Null when capture refuses. */
-    private fun openVisualizer(): Visualizer? =
+    /** The capture tap: media/game/unknown usages, 48 kHz stereo 16-bit. Null when capture refuses. */
+    private fun openCapture(): AudioRecord? =
         runCatching {
-            Visualizer(0).apply {
-                val max = runCatching { Visualizer.getCaptureSizeRange().getOrNull(1) }.getOrNull() ?: 1024
-                if (setCaptureSize(max.coerceIn(128, 1024)) != Visualizer.SUCCESS) {
-                    throw IllegalStateException("capture size $max refused")
-                }
-                setScalingMode(Visualizer.SCALING_MODE_NORMALIZED)
-                if (setEnabled(true) != Visualizer.SUCCESS || !enabled) {
-                    throw IllegalStateException("visualizer refused to enable")
-                }
-            }
+            val tap =
+                AudioPlaybackCaptureConfiguration
+                    .Builder()
+                    .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                    .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                    .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                    .build()
+            val format =
+                AudioFormat
+                    .Builder()
+                    .setSampleRate(Fft.SAMPLE_RATE)
+                    .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .build()
+            val min = AudioRecord.getMinBufferSize(Fft.SAMPLE_RATE, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+            AudioRecord
+                .Builder()
+                .setAudioPlaybackCaptureConfig(tap)
+                .setAudioFormat(format)
+                .setBufferSizeInBytes((min.coerceAtLeast(Fft.WINDOW * 4)) * 2)
+                .build()
+                .takeIf { it.state == AudioRecord.STATE_INITIALIZED }
         }.getOrNull()
 
     private fun frame(
@@ -134,7 +144,6 @@ class Spectrum(
                 "r" to Lst(r.map { Num(it.toDouble()) }),
                 "available" to bool(true),
                 "capturing" to bool(capturing),
-                "stereo" to bool(false),
             ),
         )
 
@@ -149,7 +158,6 @@ class Spectrum(
                 "r" to empty,
                 "available" to bool(available),
                 "capturing" to bool(capturing),
-                "stereo" to bool(false),
             ),
         )
     }
@@ -162,7 +170,6 @@ class Spectrum(
                 "r" to empty,
                 "available" to bool(false),
                 "capturing" to bool(false),
-                "stereo" to bool(false),
                 "reason" to Str("grant RECORD_AUDIO"),
             ),
         )

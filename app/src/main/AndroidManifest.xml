@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Speech input for the agent prompt bar, and output-mix capture for android.spectrum; only recognized text and spectrum bands reach widgets. -->
+    <!-- Speech input for the agent prompt bar, and playback capture for android.spectrum; only recognized text and spectrum bands reach widgets. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
