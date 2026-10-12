@@ -38,6 +38,7 @@ import dev.omalauncher.widgets.lang.bool
 import dev.omalauncher.widgets.runtime.Media
 import dev.omalauncher.widgets.runtime.Notifications
 import dev.omalauncher.widgets.runtime.Services
+import dev.omalauncher.widgets.runtime.Spectrum
 import dev.omalauncher.widgets.runtime.Streams
 import dev.omalauncher.widgets.runtime.Volume
 import dev.omalauncher.widgets.runtime.watchFile
@@ -82,6 +83,7 @@ class WidgetServices(
     private val media = Media(context)
     private val notifications = Notifications(context, media)
     private val volume = Volume(context)
+    private val spectrum = Spectrum(context)
 
     /** Opens launcher screens ("style" or "themes", "agents", "drawer"); set by the UI. */
     var launcherAction: ((String) -> Unit)? = null
@@ -116,6 +118,7 @@ class WidgetServices(
             "media" -> media.value()
             "notifications" -> notifications.value()
             "volume" -> volume.value()
+            "spectrum", "audioSpectrum" -> spectrum.value()
             else -> throw WidgetError("unknown android source $name")
         }
 
@@ -124,6 +127,7 @@ class WidgetServices(
             "media" -> media.updates()
             "notifications" -> notifications.updates()
             "volume" -> volume.updates()
+            "spectrum", "audioSpectrum" -> spectrum.updates()
             "battery" ->
                 callbackFlow {
                     val receiver =

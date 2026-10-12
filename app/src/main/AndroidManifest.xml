@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Speech input for the agent prompt bar; only recognized text reaches Linux. -->
+    <!-- Speech input for the agent prompt bar, and playback capture for android.spectrum; only recognized text and spectrum bands reach widgets. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- Uninstall from the app drawer's long-press menu (ACTION_DELETE). -->
@@ -154,13 +154,13 @@
             android:label="Files"
             android:launchMode="singleTask"
             android:resizeableActivity="true"
-            android:taskAffinity="dev.omalauncher.files"
+            android:taskAffinity="${applicationId}.files"
             android:theme="@style/Theme.Omalauncher.Window"
             android:windowSoftInputMode="adjustResize" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="dev.omalauncher.files"
+            android:authorities="${applicationId}.files"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data

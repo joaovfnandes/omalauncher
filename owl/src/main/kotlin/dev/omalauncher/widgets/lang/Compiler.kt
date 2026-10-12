@@ -123,8 +123,8 @@ class Compiler private constructor(
         /** What triggers bind in their statements. */
         private val TRIGGER_PARAMS = mapOf("on" to listOf("value", "old"))
 
-        /** Data only Android has; battery, media, notifications and volume update as they change, device is fixed. */
-        val ANDROID = setOf("battery", "device", "media", "notifications", "volume", "system")
+        /** Data only Android has; battery, media, notifications, volume and spectrum update as they change, device is fixed. */
+        val ANDROID = setOf("battery", "device", "media", "notifications", "volume", "system", "spectrum", "audioSpectrum")
 
         /** media("...") commands. */
         val MEDIA = setOf("toggle", "play", "pause", "next", "previous", "open")
